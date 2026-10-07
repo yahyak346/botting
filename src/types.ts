@@ -1,15 +1,20 @@
-export type MonitorKind = 'shopify' | 'page';
+export type MonitorKind = 'shopify' | 'page' | 'scan';
 export type PageMode = 'appears' | 'disappears' | 'changes';
 
 export interface MonitorConfig {
   id: string;
   name: string;
   kind: MonitorKind;
-  /** Store / collection URL (shopify) or any page URL (page). */
+  /** Store / collection URL (shopify) or any page URL (page). Empty for scans. */
   url: string;
+  /** Scan monitors: Shopify shop URLs to search. */
+  stores?: string[];
   intervalSec: number;
   enabled: boolean;
-  /** Only alert on products whose title contains one of these (empty = all). */
+  /**
+   * Only alert on products whose title contains one of these (empty = all).
+   * For scans these are the search terms; every word of a term must be in the title.
+   */
   include: string[];
   /** Never alert on products whose title contains one of these. */
   exclude: string[];
@@ -32,6 +37,8 @@ export interface ProductSnap {
   title: string;
   url: string;
   image?: string;
+  /** Shop the product came from (scans only). */
+  store?: string;
   variants: VariantSnap[];
 }
 
@@ -46,6 +53,7 @@ export type EventType =
   | 'sold_out'
   | 'page_match'
   | 'page_change'
+  | 'scan_summary'
   | 'error';
 
 /** An event before it is attributed to a monitor and timestamped. */

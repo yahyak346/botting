@@ -70,17 +70,20 @@ export function diffShopify(
 ): DetectedEvent[] {
   const events: DetectedEvent[] = [];
 
-  for (const product of Object.values(next.products)) {
+  // Compare by snapshot key: scans key products by shop as well as id.
+  for (const [key, product] of Object.entries(next.products)) {
     if (!matchesFilters(product.title, cfg)) continue;
     const base = { title: product.title, url: product.url, image: product.image };
+    const at = product.store ? [`Shop: ${product.store}`] : [];
     const inStock = product.variants.filter((v) => v.available);
-    const old = prev.products[product.id];
+    const old = prev.products[key];
 
     if (!old) {
       events.push({
         ...base,
         type: 'new_product',
         details: [
+          ...at,
           `Price: ${product.variants[0]?.price ?? '?'}`,
           inStock.length ? `In stock: ${sizes(inStock)}` : 'Not available yet',
         ],
@@ -91,7 +94,7 @@ export function diffShopify(
     const oldById = new Map(old.variants.map((v) => [v.id, v]));
     const restocked = inStock.filter((v) => !oldById.get(v.id)?.available);
     if (restocked.length) {
-      events.push({ ...base, type: 'restock', details: [`Restocked: ${sizes(restocked)}`] });
+      events.push({ ...base, type: 'restock', details: [...at, `Restocked: ${sizes(restocked)}`] });
     }
 
     const priceChanges = product.variants
@@ -99,12 +102,12 @@ export function diffShopify(
       .filter(({ v, before }) => before !== undefined && before !== v.price);
     if (priceChanges.length) {
       const { v, before } = priceChanges[0];
-      events.push({ ...base, type: 'price_change', details: [`Price: ${before} -> ${v.price}`] });
+      events.push({ ...base, type: 'price_change', details: [...at, `Price: ${before} -> ${v.price}`] });
     }
 
     const wasInStock = old.variants.some((v) => v.available);
     if (wasInStock && inStock.length === 0 && product.variants.length > 0) {
-      events.push({ ...base, type: 'sold_out', details: ['All sizes sold out'] });
+      events.push({ ...base, type: 'sold_out', details: [...at, 'All sizes sold out'] });
     }
   }
 

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { HttpError } from './http.ts';
 import { diffPage, fetchPage } from './monitors/page.ts';
 import { diffShopify, fetchShopify } from './monitors/shopify.ts';
+import { fetchScan, summarizeScan } from './monitors/scan.ts';
 import { sendDiscord } from './notify/discord.ts';
 import type { Store } from './store.ts';
 import type { DetectedEvent, MonitorConfig, MonitorEvent, Snapshot } from './types.ts';
@@ -24,11 +25,27 @@ interface Runtime {
   status: MonitorStatus;
 }
 
-async function check(cfg: MonitorConfig): Promise<Snapshot> {
-  return cfg.kind === 'shopify' ? fetchShopify(cfg) : fetchPage(cfg);
+interface CheckResult {
+  snapshot: Snapshot;
+  /** Non-fatal problems, e.g. some shops in a scan failing. */
+  warning?: string;
+}
+
+async function check(cfg: MonitorConfig, prev: Snapshot | undefined): Promise<CheckResult> {
+  if (cfg.kind === 'shopify') return { snapshot: await fetchShopify(cfg) };
+  if (cfg.kind === 'page') return { snapshot: await fetchPage(cfg) };
+  const { snapshot, failed } = await fetchScan(cfg, prev);
+  const warning = failed.length
+    ? `${failed.length} shop(s) failed: ${failed.map((f) => `${new URL(f.store).hostname} (${f.error})`).join('; ')}`
+    : undefined;
+  return { snapshot, warning };
 }
 
 export function diff(prev: Snapshot, next: Snapshot, cfg: MonitorConfig): DetectedEvent[] {
+  // Scan results are already filtered by the search terms.
+  if (prev.kind === 'shopify' && next.kind === 'shopify' && cfg.kind === 'scan') {
+    return diffShopify(prev, next, { include: [], exclude: [] });
+  }
   if (prev.kind === 'shopify' && next.kind === 'shopify') return diffShopify(prev, next, cfg);
   if (prev.kind === 'page' && next.kind === 'page') return diffPage(prev, next, cfg);
   return []; // monitor kind changed: the new snapshot becomes the baseline
@@ -107,13 +124,15 @@ export class Engine extends EventEmitter {
 
     let retryAfterSec: number | undefined;
     try {
-      const next = await check(cfg);
       const prev = this.store.data.snapshots[id];
+      const { snapshot: next, warning } = await check(cfg, prev);
       this.store.data.snapshots[id] = next;
       rt.status.failures = 0;
-      rt.status.lastError = undefined;
+      rt.status.lastError = warning;
       if (prev) {
         for (const detected of diff(prev, next, cfg)) await this.publish(cfg, detected);
+      } else if (cfg.kind === 'scan' && next.kind === 'shopify') {
+        await this.publish(cfg, summarizeScan(next, cfg));
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

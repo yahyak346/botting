@@ -60,7 +60,11 @@
   .toast.show { opacity: 1; } .toast.err { border-color: var(--red); }
   @media (max-width: 600px) { th:nth-child(3), td:nth-child(3) { display: none; } th, td { padding: 10px 12px; } .row-actions { flex-direction: column; align-items: stretch; } }
   .left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-  .page-only { display: none; } form.page .page-only { display: flex; } form.page .shopify-only { display: none; }
+  .k { display: none; }
+  form[data-kind=shopify] .k-shopify, form[data-kind=page] .k-page, form[data-kind=scan] .k-scan { display: flex; }
+  textarea { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font: inherit; min-height: 110px; resize: vertical; }
+  .pill.warn { color: var(--yellow); }
+  .t-scan_summary { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -78,19 +82,24 @@
   <div class="left">
     <section>
       <h2><span class="grow" id="formTitle">Add monitor</span></h2>
-      <form id="form">
+      <form id="form" data-kind="scan">
         <label>Type
           <select name="kind">
+            <option value="scan">Market scan (search many shops)</option>
             <option value="shopify">Shopify store</option>
             <option value="page">Any page (keyword)</option>
           </select>
         </label>
-        <label>Name <input name="name" placeholder="Kith new arrivals"></label>
-        <label class="wide">URL <input name="url" required placeholder="https://store.com or https://store.com/collections/footwear"></label>
-        <label class="shopify-only">Include keywords <input name="include" placeholder="dunk, jordan"></label>
-        <label class="shopify-only">Exclude keywords <input name="exclude" placeholder="kids, toddler"></label>
-        <label class="page-only">Keyword <input name="keyword" placeholder="Add to cart"></label>
-        <label class="page-only">Alert when
+        <label>Name <input name="name" placeholder="Pokémon 30th hunt"></label>
+        <label class="wide k k-shopify k-page">URL <input name="url" placeholder="https://store.com or https://store.com/collections/footwear"></label>
+        <label class="wide k k-scan">Shops to scan, one per line
+          <textarea name="stores" placeholder="shop-one.com&#10;https://shop-two.com&#10;cardshop.co.uk"></textarea>
+        </label>
+        <label class="k k-scan">Search for (comma-separated) <input name="include" data-k="scan" placeholder="pokemon 30th, pokemon celebration"></label>
+        <label class="k k-shopify">Include keywords <input name="include" data-k="shopify" placeholder="dunk, jordan"></label>
+        <label class="k k-shopify k-scan">Exclude keywords <input name="exclude" placeholder="sleeves, binder"></label>
+        <label class="k k-page">Keyword <input name="keyword" placeholder="Add to cart"></label>
+        <label class="k k-page">Alert when
           <select name="pageMode">
             <option value="appears">keyword appears</option>
             <option value="disappears">keyword disappears</option>
@@ -137,7 +146,7 @@
 
 <script>
 const $ = (sel) => document.querySelector(sel);
-const LABELS = { new_product: 'New product', restock: 'Restock', price_change: 'Price change', sold_out: 'Sold out', page_match: 'Keyword alert', page_change: 'Page changed', error: 'Error' };
+const LABELS = { scan_summary: 'Market scan', new_product: 'New product', restock: 'Restock', price_change: 'Price change', sold_out: 'Sold out', page_match: 'Keyword alert', page_change: 'Page changed', error: 'Error' };
 let monitors = [];
 let editingId = null;
 let alertCount = 0;
@@ -184,7 +193,8 @@ function safeHref(url) {
 function statusPill(m) {
   const s = m.status || {};
   if (!m.enabled) return el('span', { className: 'pill off', textContent: 'Paused' });
-  if (s.running) return el('span', { className: 'pill run', textContent: 'Checking…' });
+  if (s.running) return el('span', { className: 'pill run', textContent: m.kind === 'scan' ? 'Scanning…' : 'Checking…' });
+  if (s.lastError && !s.failures) return el('span', { className: 'pill warn', textContent: 'Some shops failed', title: s.lastError });
   if (s.lastError) return el('span', { className: 'pill err', textContent: 'Error', title: s.lastError });
   if (s.lastCheck) return el('span', { className: 'pill ok', textContent: 'Watching' });
   return el('span', { className: 'pill off', textContent: 'Starting' });
@@ -193,7 +203,7 @@ function statusPill(m) {
 function renderMonitors() {
   const body = $('#monitors');
   body.replaceChildren(...monitors.map((m) => {
-    const filters = m.kind === 'shopify'
+    const filters = m.kind !== 'page'
       ? [m.include.length ? '+' + m.include.join(', +') : '', m.exclude.length ? '-' + m.exclude.join(', -') : ''].filter(Boolean).join('  ')
       : `${m.pageMode}${m.keyword ? ': "' + m.keyword + '"' : ''}`;
     const actions = el('div', { className: 'row-actions' }, [
@@ -205,7 +215,9 @@ function renderMonitors() {
     return el('tr', {}, [
       el('td', {}, [
         el('div', { textContent: m.name }),
-        el('div', { className: 'sub', textContent: `${m.kind === 'shopify' ? 'Shopify' : 'Page'} · every ${m.intervalSec}s · ${m.url}` }),
+        el('div', { className: 'sub', textContent: m.kind === 'scan'
+          ? `Market scan · every ${m.intervalSec}s · ${m.stores.length} shop(s): ${m.stores.map((s) => new URL(s).hostname).join(', ')}`
+          : `${m.kind === 'shopify' ? 'Shopify' : 'Page'} · every ${m.intervalSec}s · ${m.url}` }),
         filters ? el('div', { className: 'sub', textContent: filters }) : '',
       ]),
       el('td', {}, statusPill(m)),
@@ -243,16 +255,24 @@ function addEvents(events, prepend) {
 }
 
 function formData() {
-  const f = new FormData($('#form'));
-  const data = Object.fromEntries(f.entries());
+  const form = $('#form');
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.include = form.querySelector(`input[name=include][data-k=${form.dataset.kind}]`)?.value ?? '';
   data.intervalSec = Number(data.intervalSec);
   return data;
+}
+
+function setKind(kind) {
+  const form = $('#form');
+  form.dataset.kind = kind;
+  form.elements.kind.value = kind;
+  if (!editingId) form.elements.intervalSec.value = kind === 'scan' ? 120 : 60;
 }
 
 function resetForm() {
   editingId = null;
   $('#form').reset();
-  $('#form').className = '';
+  setKind('scan');
   $('#formTitle').textContent = 'Add monitor';
   $('#submitBtn').textContent = 'Add monitor';
   $('#cancelEdit').hidden = true;
@@ -261,10 +281,13 @@ function resetForm() {
 function startEdit(m) {
   editingId = m.id;
   const form = $('#form');
+  setKind(m.kind);
   for (const [k, v] of Object.entries(m)) {
-    if (form.elements[k]) form.elements[k].value = Array.isArray(v) ? v.join(', ') : (v ?? '');
+    if (k === 'include' || !form.elements[k]) continue;
+    form.elements[k].value = Array.isArray(v) ? v.join(k === 'stores' ? '\n' : ', ') : (v ?? '');
   }
-  form.className = m.kind === 'page' ? 'page' : '';
+  const include = form.querySelector(`input[name=include][data-k=${m.kind}]`);
+  if (include) include.value = m.include.join(', ');
   $('#formTitle').textContent = 'Edit monitor';
   $('#submitBtn').textContent = 'Save changes';
   $('#cancelEdit').hidden = false;
@@ -289,7 +312,7 @@ async function remove(m) {
   } catch (e) { toast(e.message, true); }
 }
 
-$('#form').kind.addEventListener('change', (e) => { $('#form').className = e.target.value === 'page' ? 'page' : ''; });
+$('#form').kind.addEventListener('change', (e) => setKind(e.target.value));
 $('#cancelEdit').addEventListener('click', resetForm);
 $('#form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -300,7 +323,7 @@ $('#form').addEventListener('submit', async (e) => {
       const m = await api('/monitors', { method: 'POST', body: formData() });
       monitors.push(m);
       renderMonitors();
-      toast('Monitor added. First check builds a baseline.');
+      toast(m.kind === 'scan' ? 'Scan added. First results arrive in the live feed shortly.' : 'Monitor added. First check builds a baseline.');
       resetForm();
     }
   } catch (err) { toast(err.message, true); }
@@ -330,6 +353,7 @@ function connect() {
 }
 
 (async () => {
+  setKind('scan');
   try {
     const [ms, events, settings] = await Promise.all([api('/monitors'), api('/events'), api('/settings')]);
     monitors = ms;

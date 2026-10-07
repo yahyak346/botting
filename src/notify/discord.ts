@@ -7,6 +7,7 @@ const COLORS: Record<MonitorEvent['type'], number> = {
   sold_out: 0xed4245,
   page_match: 0x57f287,
   page_change: 0xeb459e,
+  scan_summary: 0x7c5cff,
   error: 0x99aab5,
 };
 
@@ -17,6 +18,7 @@ const LABELS: Record<MonitorEvent['type'], string> = {
   sold_out: 'Sold out',
   page_match: 'Keyword alert',
   page_change: 'Page changed',
+  scan_summary: 'Market scan',
   error: 'Error',
 };
 

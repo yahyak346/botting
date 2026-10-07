@@ -30,12 +30,19 @@ Open http://localhost:3001, paste your Discord webhook, add a monitor, and hit *
 
 | Type | What it watches | Alerts |
 | --- | --- | --- |
+| **Market scan** | Up to 50 Shopify shops at once, searched for your terms (e.g. `pokemon 30th`) | a summary of everything in stock on the first scan, then new listings, restocks, price changes, sold out |
 | **Shopify store** | `https://store.com` or `https://store.com/collections/<name>` (reads the public `products.json` feed) | new product, restock (lists which sizes), price change, sold out |
 | **Any page** | Any URL. Scripts, styles and markup are stripped before comparing | keyword **appears** (e.g. "Add to cart"), keyword **disappears** (e.g. "Sold out"), or text **changes** |
 
 - **Include / exclude keywords** (Shopify) filter by product title, case-insensitive:
   include `dunk, jordan`, exclude `kids, toddler`.
-- The first check of each monitor just records a baseline. Alerts start from the second check.
+- **Market scan** uses each shop's search (`/search/suggest.json`), falling back to its
+  product feed if search is off. Every word of a search term must be in the product title
+  (accents ignored, so `pokemon` matches "Pokémon"). Shops are checked one at a time,
+  1.5s apart. If some shops fail, the rest still report and the monitor shows
+  "Some shops failed". Big retailers that aren't on Shopify (Pokémon Center, Target,
+  Walmart) can't be scanned.
+- The first check of each monitor just records a baseline (scans also post a summary). Alerts start from the second check.
 - Each monitor can override the default webhook, e.g. one Discord channel per store.
 
 ## How it works
@@ -46,6 +53,7 @@ src/
   engine.ts            per-monitor scheduler (interval, jitter, exponential backoff)
   monitors/shopify.ts  products.json fetch + diff (new / restock / price / sold out)
   monitors/page.ts     HTML -> text, keyword / change detection
+  monitors/scan.ts     multi-shop search (market scan)
   notify/discord.ts    webhook embeds, honours Discord rate limits
   server.ts            dashboard + REST API + live feed (Server-Sent Events)
   store.ts             JSON persistence in data/db.json (atomic writes)
@@ -63,7 +71,7 @@ All write requests need `Content-Type: application/json`.
 | Method | Path | |
 | --- | --- | --- |
 | GET | `/api/monitors` | list monitors with live status |
-| POST | `/api/monitors` | create (`kind`, `url`, `name?`, `intervalSec?`, `include?`, `exclude?`, `keyword?`, `pageMode?`, `webhookUrl?`) |
+| POST | `/api/monitors` | create (`kind` = `scan`/`shopify`/`page`, `url`, `stores` (scan), `name?`, `intervalSec?`, `include?`, `exclude?`, `keyword?`, `pageMode?`, `webhookUrl?`) |
 | PATCH | `/api/monitors/:id` | update any of the above, or `enabled` |
 | DELETE | `/api/monitors/:id` | remove |
 | POST | `/api/monitors/:id/run` | check now |
