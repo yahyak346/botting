@@ -10,6 +10,11 @@ polls no more often than every 30 seconds, backs off on errors and respects
 
 ## Quick start
 
+**Windows, no terminal needed:** download the ZIP (green **Code** button, then **Download ZIP**),
+extract it, and double-click `start.bat`. It checks Node.js is installed and opens the dashboard.
+
+**Any OS, from a terminal:**
+
 Requires Node.js 22.18+ (TypeScript runs natively, no build step).
 
 ```bash
